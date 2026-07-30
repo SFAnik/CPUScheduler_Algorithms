@@ -1,0 +1,383 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>CPU Scheduler Visualizer</title>
+  <!-- Add html2canvas and jsPDF libraries from CDN for high-fidelity PDF exports -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <style>
+    :root { color-scheme: dark; --bg:#07111f; --panel:#0e1c2e; --line:#263a52; --text:#e8f0fa; --muted:#9db0c6; --accent:#38bdf8; }
+    * { box-sizing:border-box } body { margin:0; font:14px system-ui,Segoe UI,Arial,sans-serif; background:linear-gradient(135deg,#06101d,#102a43); color:var(--text) }
+    main { max-width:1200px; margin:auto; padding:28px 18px 50px } h1 { margin:0 0 5px; font-size:26px } h2 { font-size:16px; margin:0 0 14px } p { color:var(--muted) }
+    .grid { display:grid; grid-template-columns:380px 1fr; gap:18px } .card { background:rgba(14,28,46,.96); border:1px solid var(--line); border-radius:14px; padding:18px; box-shadow:0 12px 30px #0004 }
+    label { display:block; margin:10px 0 5px; color:var(--muted); font-size:12px } input,select,button { font:inherit; border-radius:8px; border:1px solid var(--line) }
+    input,select { width:100%; padding:9px; background:#091624; color:var(--text) } button { cursor:pointer; padding:9px 12px; color:white; background:#1678b9; border-color:#2196de; font-weight:650 } button:hover { filter:brightness(1.12) } .secondary { background:#172b42; border-color:#314965 }
+    .row { display:grid; grid-template-columns:repeat(3,1fr); gap:8px } .actions { display:flex; gap:8px; margin-top:14px; flex-wrap:wrap } .checks { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin:12px 0 } .checks label { display:flex; align-items:center; gap:7px; margin:0; font-size:13px; color:var(--text) } .checks input { width:auto }
+    table { border-collapse:collapse; width:100%; margin-top:14px } th,td { padding:8px; text-align:left; border-bottom:1px solid var(--line) } th { font-size:11px; color:var(--muted); text-transform:uppercase } .remove { padding:4px 7px; font-size:12px; background:#7f2635; border-color:#ad3c4d }
+    .result { margin:0 0 16px; padding-bottom:16px; border-bottom:1px solid var(--line) } .metrics { display:flex; gap:16px; flex-wrap:wrap; color:var(--muted); font-size:12px } .metrics b { color:var(--text) } .gantt { display:flex; min-width:560px; height:58px; border:1px solid var(--line); border-radius:8px; overflow:hidden; margin:10px 0 5px } .gantt-wrap { overflow:auto } .block { min-width:34px; display:flex; align-items:center; justify-content:center; position:relative; color:#07111f; font-weight:800; border-right:1px solid #07111f } .block small { position:absolute; bottom:2px; color:#07111f; font-size:9px }
+    .empty { color:var(--muted); padding:25px 0; text-align:center } .note { font-size:12px; margin-top:10px } .recommendation { background:#12314a; border:1px solid #2b7fb2; border-radius:10px; padding:13px; margin-bottom:16px } .queue { color:var(--muted); font-size:12px; margin-top:7px } .queue code { color:#d5f0ff } .download { background:#16805a; border-color:#23ad7b } @media(max-width:850px) { .grid { grid-template-columns:1fr } }
+  </style>
+</head>
+<body>
+<main>
+  <h1>CPU Scheduler Visualizer</h1>
+  <p>Offline version — open this file directly in any browser. No extensions or internet connection required.</p>
+  <div class="grid">
+    <section class="card">
+      <h2>Processes</h2>
+      <div class="row">
+        <div><label for="burst">Burst time</label><input id="burst" type="number" min="1" value="10"></div>
+        <div><label for="arrival">Arrival time</label><input id="arrival" type="number" min="0" value="0"></div>
+        <div><label for="priority">Priority</label><input id="priority" type="number" min="1" value="1"></div>
+      </div>
+      <div class="actions"><button id="add">Add process</button><button id="sample" class="secondary">Load sample</button><button id="clear" class="secondary">Clear</button></div>
+      <table><thead><tr><th>Process</th><th>Burst</th><th>Arrival</th><th>Priority</th><th></th></tr></thead><tbody id="processRows"></tbody></table>
+      <label for="quantum">Round Robin quantum</label><input id="quantum" type="number" min="1" value="3">
+      <h2 style="margin-top:18px">Algorithms</h2>
+      <div class="checks" id="algorithms">
+        <label><input type="checkbox" value="fcfs" checked> FCFS</label><label><input type="checkbox" value="sjf" checked> SJF</label>
+        <label><input type="checkbox" value="srtf" checked> SRTF</label><label><input type="checkbox" value="pnp" checked> Priority (non-preemptive)</label>
+        <label><input type="checkbox" value="pp" checked> Priority (preemptive)</label><label><input type="checkbox" value="rr" checked> Round Robin</label>
+      </div>
+      <h2 style="margin-top:18px">Recommendation criteria</h2>
+      <div class="checks" id="criteria">
+        <label><input type="checkbox" value="wt" checked> Waiting time</label><label><input type="checkbox" value="tat" checked> Turnaround time</label>
+        <label><input type="checkbox" value="rt" checked> Response time</label><label><input type="checkbox" value="util" checked> CPU utilization</label>
+      </div>
+      <button id="run">Run selected algorithms</button>
+      <p class="note">Lower priority number means higher priority.</p>
+    </section>
+    <section class="card"><div class="actions" style="justify-content:space-between;align-items:center;margin-top:0"><h2 style="margin:0">Results</h2><button id="download" class="download">Download result sheet (PDF)</button></div><div id="results" class="empty">Add one or more processes, then run the scheduler.</div></section>
+  </div>
+</main>
+<script>
+(() => {
+  let processes = [
+    {id:1, burst:8, arrival:0, priority:2}, {id:2, burst:4, arrival:1, priority:1},
+    {id:3, burst:9, arrival:2, priority:3}, {id:4, burst:5, arrival:3, priority:2}
+  ];
+  const colors = ['#38bdf8','#a78bfa','#34d399','#fbbf24','#fb7185','#fb923c','#22d3ee','#bef264'];
+  let lastResults = [];
+  const $ = id => document.getElementById(id);
+  const clone = () => processes.map(p => ({...p, remaining:p.burst}));
+  const addBlock = (blocks,id,start,end) => { const last=blocks[blocks.length-1]; if(last && last.id===id && last.end===start) last.end=end; else blocks.push({id,start,end}); };
+  function finish(name, blocks, ps, first, done) {
+    const byId = Object.fromEntries(ps.map(p=>[p.id,p])); let wt=0,tat=0,rt=0;
+    ps.forEach(p => { const completion=done[p.id]; const turnaround=completion-p.arrival; tat+=turnaround; wt+=turnaround-p.burst; rt+=first[p.id]-p.arrival; });
+    const end=blocks.length ? blocks[blocks.length-1].end : 0; const busy=blocks.filter(b=>b.id!==null).reduce((s,b)=>s+b.end-b.start,0);
+    return {name,blocks, wt:wt/ps.length,tat:tat/ps.length,rt:rt/ps.length,util:end?busy/end*100:0};
+  }
+  function schedule(name, choose, preemptive) {
+    const ps=clone(), blocks=[], first={}, done={}, queues=[]; let t=0, completed=0;
+    while(completed<ps.length) {
+      const ready=ps.filter(p=>p.arrival<=t && p.remaining>0);
+      if(!ready.length) { const next=Math.min(...ps.filter(p=>p.remaining>0).map(p=>p.arrival)); addBlock(blocks,null,t,next); t=next; continue; }
+      const p=choose(ready); queues.push({time:t,running:p.id,ready:ready.filter(x=>x.id!==p.id).map(x=>x.id)}); if(first[p.id]===undefined) first[p.id]=t;
+      const duration=preemptive ? 1 : p.remaining; addBlock(blocks,p.id,t,t+duration); p.remaining-=duration; t+=duration;
+      if(!p.remaining) { done[p.id]=t; completed++; }
+    } const result=finish(name,blocks,ps,first,done); result.queues=queues; return result;
+  }
+  function roundRobin() {
+    const ps=clone(), blocks=[], first={}, done={}, queue=[], queues=[]; let t=0, completed=0, added=new Set(), q=Math.max(1,Number($('quantum').value)||1);
+    const arrivals=()=>ps.filter(p=>p.arrival<=t&&p.remaining>0&&!added.has(p.id)).sort((a,b)=>a.arrival-b.arrival||a.id-b.id).forEach(p=>{queue.push(p);added.add(p.id)});
+    while(completed<ps.length) { arrivals(); if(!queue.length) { const n=Math.min(...ps.filter(p=>p.remaining>0).map(p=>p.arrival)); addBlock(blocks,null,t,n);t=n;continue; }
+      const p=queue.shift(); queues.push({time:t,running:p.id,ready:queue.map(x=>x.id)}); if(first[p.id]===undefined)first[p.id]=t; const d=Math.min(q,p.remaining); addBlock(blocks,p.id,t,t+d);p.remaining-=d;t+=d;arrivals();
+      if(p.remaining){queue.push(p)}else{done[p.id]=t;completed++;}
+    } const result=finish('Round Robin',blocks,ps,first,done); result.queues=queues; return result;
+  }
+  const algorithms = {
+    fcfs:()=>schedule('FCFS',(r)=>r.sort((a,b)=>a.arrival-b.arrival||a.id-b.id)[0],false),
+    sjf:()=>schedule('SJF',(r)=>r.sort((a,b)=>a.burst-b.burst||a.arrival-b.arrival)[0],false),
+    srtf:()=>schedule('SRTF',(r)=>r.sort((a,b)=>a.remaining-b.remaining||a.arrival-b.arrival)[0],true),
+    pnp:()=>schedule('Priority (non-preemptive)',(r)=>r.sort((a,b)=>a.priority-b.priority||a.arrival-b.arrival)[0],false),
+    pp:()=>schedule('Priority (preemptive)',(r)=>r.sort((a,b)=>a.priority-b.priority||a.arrival-b.arrival)[0],true),
+    rr:roundRobin
+  };
+  function renderProcesses(){ $('processRows').innerHTML=processes.length?processes.map(p=>'<tr><td>P'+p.id+'</td><td>'+p.burst+'</td><td>'+p.arrival+'</td><td>'+p.priority+'</td><td><button class="remove" data-id="'+p.id+'">Remove</button></td></tr>').join(''):'<tr><td colspan="5" class="empty">No processes</td></tr>'; document.querySelectorAll('.remove').forEach(b=>b.onclick=()=>{processes=processes.filter(p=>p.id!==Number(b.dataset.id));renderProcesses()}); }
+  function render(results) { if(!results.length){$('results').className='empty';$('results').textContent='Select at least one algorithm.';return} $('results').className='';
+    $('results').innerHTML=results.map(r=>{ const total=r.blocks[r.blocks.length-1].end||1; const blocks=r.blocks.map(b=>{const label=b.id===null?'Idle':'P'+b.id;return '<div class="block" style="width:'+Math.max(3,(b.end-b.start)/total*100)+'%;background:'+(b.id===null?'#64748b':colors[(b.id-1)%colors.length])+'">'+label+'<small>'+b.start+'–'+b.end+'</small></div>'}).join('');return '<div class="result"><h2>'+r.name+'</h2><div class="metrics"><span>Avg waiting: <b>'+r.wt.toFixed(2)+'</b></span><span>Avg turnaround: <b>'+r.tat.toFixed(2)+'</b></span><span>Avg response: <b>'+r.rt.toFixed(2)+'</b></span><span>CPU use: <b>'+r.util.toFixed(1)+'%</b></span></div><div class="gantt-wrap"><div class="gantt">'+blocks+'</div></div></div>'; }).join('');
+  }
+  function recommend(results) {
+    const criteria=[...document.querySelectorAll('#criteria input:checked')].map(x=>x.value);
+    if(!criteria.length) return null;
+    const score=r=>criteria.reduce((sum,c)=>sum+(c==='util' ? Math.max(...results.map(x=>x.util))-r.util : r[c]-Math.min(...results.map(x=>x[c]))),0);
+    return results.reduce((best,r)=>score(r)<score(best)?r:best,results[0]);
+  }
+  function renderEnhanced(results) {
+    lastResults=results;
+    if(!results.length){$('results').className='empty';$('results').textContent='Select at least one algorithm.';return;}
+    $('results').className='';
+    const best=recommend(results);
+    const summary='<table><thead><tr><th>Algorithm</th><th>Waiting</th><th>Turnaround</th><th>Response</th><th>CPU use</th></tr></thead><tbody>'+
+      results.map(r=>'<tr><td>'+r.name+'</td><td>'+r.wt.toFixed(2)+'</td><td>'+r.tat.toFixed(2)+'</td><td>'+r.rt.toFixed(2)+'</td><td>'+r.util.toFixed(1)+'%</td></tr>').join('')+'</tbody></table>';
+    const recommendation=best?'<div class="recommendation"><b>Best recommendation: '+best.name+'</b><div class="note">Selected criteria values: waiting '+best.wt.toFixed(2)+', turnaround '+best.tat.toFixed(2)+', response '+best.rt.toFixed(2)+', CPU utilization '+best.util.toFixed(1)+'%.</div></div>':'<div class="recommendation">Select at least one recommendation criterion.</div>';
+    const details=results.map(r=>{
+      const total=r.blocks[r.blocks.length-1].end||1;
+      const blocks=r.blocks.map(b=>'<div class="block" style="width:'+Math.max(3,(b.end-b.start)/total*100)+'%;background:'+(b.id===null?'#64748b':colors[(b.id-1)%colors.length])+'">'+(b.id===null?'Idle':'P'+b.id)+'<small>'+b.start+'-'+b.end+'</small></div>').join('');
+      const queue=(r.queues||[]).map(q=>'t='+q.time+': running P'+q.running+' | ready ['+(q.ready.length?q.ready.map(id=>'P'+id).join(', '):'empty')+']').join('<br>');
+      return '<div class="result"><h2>'+r.name+'</h2><div class="metrics"><span>Avg waiting: <b>'+r.wt.toFixed(2)+'</b></span><span>Avg turnaround: <b>'+r.tat.toFixed(2)+'</b></span><span>Avg response: <b>'+r.rt.toFixed(2)+'</b></span><span>CPU use: <b>'+r.util.toFixed(1)+'%</b></span></div><div class="gantt-wrap"><div class="gantt">'+blocks+'</div></div><details class="queue" open><summary>Ready queue timeline</summary><code>'+queue+'</code></details></div>';
+    }).join('');
+    $('results').innerHTML=recommendation+summary+details;
+  }
+  $('add').onclick=()=>{const burst=Number($('burst').value),arrival=Number($('arrival').value),priority=Number($('priority').value);if(!Number.isFinite(burst)||burst<1||!Number.isFinite(arrival)||arrival<0||!Number.isFinite(priority)||priority<1){alert('Enter a burst time of at least 1, and non-negative arrival and priority values.');return}processes.push({id:Math.max(0,...processes.map(p=>p.id))+1,burst,arrival,priority});renderProcesses()};
+  $('sample').onclick=()=>{processes=[{id:1,burst:8,arrival:0,priority:2},{id:2,burst:4,arrival:1,priority:1},{id:3,burst:9,arrival:2,priority:3},{id:4,burst:5,arrival:3,priority:2}];renderProcesses()};
+  $('clear').onclick=()=>{processes=[];renderProcesses();$('results').className='empty';$('results').textContent='Add one or more processes, then run the scheduler.'};
+  $('run').onclick=()=>{if(!processes.length){alert('Add at least one process.');return}const chosen=[...document.querySelectorAll('#algorithms input:checked')].map(x=>x.value);renderEnhanced(chosen.map(k=>algorithms[k]()))};
+
+  // Upgraded High-Fidelity Tabular PDF Exporter showing Gantt Charts and Ready Queues with zero page breaks/overlaps
+  function downloadPdf() {
+    if(!lastResults.length){alert('Run the scheduler first.');return;}
+    if(typeof html2canvas === 'undefined' || typeof jspdf === 'undefined') {
+      alert('PDF libraries are loading or you are offline. Please wait or connect to the internet.');
+      return;
+    }
+
+    const printColors = ['#fecdd3', '#bae6fd', '#a7f3d0', '#fef08a', '#ddd6fe', '#fbcfe8', '#ccfbf1', '#e2e8f0'];
+    const best = recommend(lastResults);
+
+    // Create a hidden parent container for our pages
+    const printParent = document.createElement('div');
+    printParent.id = 'pdf-print-parent';
+    printParent.style.position = 'absolute';
+    printParent.style.left = '-9999px';
+    printParent.style.top = '0';
+    printParent.style.width = '800px';
+
+    // Helper to create a standard page
+    const createPageNode = () => {
+      const pageNode = document.createElement('div');
+      pageNode.style.width = '800px';
+      pageNode.style.height = '1130px';
+      pageNode.style.background = '#ffffff';
+      pageNode.style.color = '#1e293b';
+      pageNode.style.padding = '45px';
+      pageNode.style.boxSizing = 'border-box';
+      pageNode.style.fontFamily = 'system-ui, -apple-system, sans-serif';
+      pageNode.style.display = 'flex';
+      pageNode.style.flexDirection = 'column';
+      pageNode.style.justifyContent = 'flex-start';
+      pageNode.style.position = 'relative';
+      return pageNode;
+    };
+
+    // --- PAGE 1: REPORT SUMMARY ---
+    const page1 = createPageNode();
+    page1.innerHTML = `
+      <div style="border-bottom: 3px solid #0f172a; padding-bottom: 12px; margin-bottom: 24px;">
+        <h1 style="margin: 0; font-size: 28px; color: #0f172a; font-weight: 800; letter-spacing: -0.5px;">CPU Scheduler Analysis Report</h1>
+        <p style="margin: 4px 0 0; font-size: 13px; color: #64748b; font-weight: 500;">Generated on ${new Date().toLocaleString()}</p>
+      </div>
+
+      <!-- Process Specification Table -->
+      <div style="margin-bottom: 24px;">
+        <h2 style="font-size: 15px; margin: 0 0 10px; color: #0f172a; font-weight: 700; border-left: 4px solid #3b82f6; padding-left: 8px;">1. Input Processes Configuration</h2>
+        <table style="width: 100%; border-collapse: collapse; font-size: 11px; text-align: left;">
+          <thead>
+            <tr style="background: #f8fafc; border-bottom: 2px solid #cbd5e1;">
+              <th style="padding: 8px 12px; font-weight: 700; color: #475569;">Process ID</th>
+              <th style="padding: 8px 12px; font-weight: 700; color: #475569;">Burst Time</th>
+              <th style="padding: 8px 12px; font-weight: 700; color: #475569;">Arrival Time</th>
+              <th style="padding: 8px 12px; font-weight: 700; color: #475569;">Priority</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${processes.map(p => `
+              <tr style="border-bottom: 1px solid #f1f5f9;">
+                <td style="padding: 8px 12px; font-weight: 700; color: #0f172a;">P${p.id}</td>
+                <td style="padding: 8px 12px; color: #334155;">${p.burst} ms</td>
+                <td style="padding: 8px 12px; color: #334155;">${p.arrival} ms</td>
+                <td style="padding: 8px 12px; color: #334155;">${p.priority}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Recommendation -->
+      ${best ? `
+        <div style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 12px; padding: 16px; margin-bottom: 24px;">
+          <h3 style="margin: 0 0 4px; font-size: 14px; color: #14532d; font-weight: 700;">🥇 Recommended Optimal Algorithm</h3>
+          <p style="margin: 0; font-size: 12px; color: #166534; line-height: 1.5;">
+            Based on the active evaluation criteria, <strong>${best.name}</strong> is identified as the optimal algorithm for this workload. It secures an average waiting time of <strong>${best.wt.toFixed(2)} ms</strong> and a turnaround time of <strong>${best.tat.toFixed(2)} ms</strong>, achieving superior resource utilization.
+          </p>
+        </div>
+      ` : ''}
+
+      <!-- Performance Summary Table -->
+      <div style="margin-bottom: 24px;">
+        <h2 style="font-size: 15px; margin: 0 0 10px; color: #0f172a; font-weight: 700; border-left: 4px solid #10b981; padding-left: 8px;">2. Comparative Metrics Summary</h2>
+        <table style="width: 100%; border-collapse: collapse; font-size: 11px; text-align: left;">
+          <thead>
+            <tr style="background: #f8fafc; border-bottom: 2px solid #cbd5e1;">
+              <th style="padding: 8px 12px; font-weight: 700; color: #475569;">Algorithm</th>
+              <th style="padding: 8px 12px; font-weight: 700; color: #475569; text-align: center;">Avg Waiting</th>
+              <th style="padding: 8px 12px; font-weight: 700; color: #475569; text-align: center;">Avg Turnaround</th>
+              <th style="padding: 8px 12px; font-weight: 700; color: #475569; text-align: center;">Avg Response</th>
+              <th style="padding: 8px 12px; font-weight: 700; color: #475569; text-align: center;">CPU Util.</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${lastResults.map(r => `
+              <tr style="border-bottom: 1px solid #f1f5f9; ${best && r.name === best.name ? 'background: #f0fdf4;' : ''}">
+                <td style="padding: 8px 12px; font-weight: 700; color: #0f172a;">${r.name}</td>
+                <td style="padding: 8px 12px; text-align: center; color: #15803d; font-weight: 700;">${r.wt.toFixed(2)} ms</td>
+                <td style="padding: 8px 12px; text-align: center; color: #1d4ed8; font-weight: 700;">${r.tat.toFixed(2)} ms</td>
+                <td style="padding: 8px 12px; text-align: center; color: #6d28d9; font-weight: 600;">${r.rt.toFixed(2)} ms</td>
+                <td style="padding: 8px 12px; text-align: center; color: #b45309; font-weight: 700;">${r.util.toFixed(1)}%</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Footer Info -->
+      <div style="position: absolute; bottom: 30px; left: 45px; right: 45px; border-top: 1px solid #e2e8f0; padding-top: 12px; display: flex; justify-content: space-between; font-size: 10px; color: #94a3b8;">
+        <span>CPU Scheduler Visualizer - Analytical Report</span>
+        <span>Page 1 of ${lastResults.length + 1}</span>
+      </div>
+    `;
+    printParent.appendChild(page1);
+
+    // --- PAGES 2+: ONE ALGORITHM PER PAGE ---
+    lastResults.forEach((r, idx) => {
+      const pageAlgo = createPageNode();
+      const totalTime = r.blocks[r.blocks.length - 1].end || 1;
+
+      // Gantt Blocks
+      const blocksHtml = r.blocks.map(b => {
+        const isIdle = b.id === null;
+        const label = isIdle ? 'Idle' : 'P' + b.id;
+        const bgColor = isIdle ? '#cbd5e1' : printColors[(b.id - 1) % printColors.length];
+        const widthPct = Math.max(3, ((b.end - b.start) / totalTime) * 100);
+        return `
+          <div style="
+            width: ${widthPct}%; 
+            background: ${bgColor}; 
+            border-right: 1px solid #0f172a; 
+            display: flex; 
+            flex-direction: column; 
+            align-items: center; 
+            justify-content: center; 
+            height: 48px; 
+            color: #0f172a; 
+            font-size: 11px; 
+            font-weight: 800;
+            position: relative;
+            box-sizing: border-box;
+          ">
+            <span>${label}</span>
+            <span style="font-size: 8px; font-weight: 600; opacity: 0.85;">${b.start}-${b.end}</span>
+          </div>
+        `;
+      }).join('');
+
+      // Ready Queue Timelines
+      const queuesHtml = (r.queues || []).map(q => `
+        <div style="font-family: monospace; font-size: 10px; color: #334155; padding: 4px 0; border-bottom: 1px dashed #f1f5f9; display: flex; justify-content: space-between;">
+          <span><strong>t = ${q.time} ms</strong>: Executing <strong style="color: #1d4ed8;">P${q.running}</strong></span>
+          <span style="color: #475569;">Ready Queue: [${q.ready.length ? q.ready.map(id => 'P' + id).join(', ') : 'empty'}]</span>
+        </div>
+      `).join('');
+
+      pageAlgo.innerHTML = `
+        <div style="border-bottom: 3px solid #0f172a; padding-bottom: 12px; margin-bottom: 24px;">
+          <h2 style="margin: 0; font-size: 22px; color: #0f172a; font-weight: 800; letter-spacing: -0.5px;">Timeline & Simulation: ${r.name}</h2>
+          <p style="margin: 4px 0 0; font-size: 12px; color: #64748b; font-weight: 500;">Detailed performance metrics and simulation logs for ${r.name}.</p>
+        </div>
+
+        <!-- Metrics cards -->
+        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 24px;">
+          <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px; text-align: center;">
+            <div style="font-size: 9px; text-transform: uppercase; font-weight: 700; color: #64748b; margin-bottom: 4px;">Avg Waiting Time</div>
+            <div style="font-size: 16px; font-weight: 800; color: #15803d;">${r.wt.toFixed(2)} ms</div>
+          </div>
+          <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px; text-align: center;">
+            <div style="font-size: 9px; text-transform: uppercase; font-weight: 700; color: #64748b; margin-bottom: 4px;">Avg Turnaround</div>
+            <div style="font-size: 16px; font-weight: 800; color: #1d4ed8;">${r.tat.toFixed(2)} ms</div>
+          </div>
+          <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px; text-align: center;">
+            <div style="font-size: 9px; text-transform: uppercase; font-weight: 700; color: #64748b; margin-bottom: 4px;">Avg Response Time</div>
+            <div style="font-size: 16px; font-weight: 800; color: #6d28d9;">${r.rt.toFixed(2)} ms</div>
+          </div>
+          <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px; text-align: center;">
+            <div style="font-size: 9px; text-transform: uppercase; font-weight: 700; color: #64748b; margin-bottom: 4px;">CPU Utilization</div>
+            <div style="font-size: 16px; font-weight: 800; color: #b45309;">${r.util.toFixed(1)}%</div>
+          </div>
+        </div>
+
+        <!-- Gantt Chart -->
+        <div style="margin-bottom: 24px;">
+          <h3 style="font-size: 14px; margin: 0 0 10px; color: #0f172a; font-weight: 700; border-left: 4px solid #3b82f6; padding-left: 8px;">Gantt Chart Timeline</h3>
+          <div style="border: 2px solid #0f172a; border-radius: 8px; overflow: hidden; display: flex; width: 100%;">
+            ${blocksHtml}
+          </div>
+        </div>
+
+        <!-- Ready Queue Timeline Box -->
+        <div style="flex-grow: 1; display: flex; flex-direction: column; margin-bottom: 30px;">
+          <h3 style="font-size: 14px; margin: 0 0 10px; color: #0f172a; font-weight: 700; border-left: 4px solid #6b7280; padding-left: 8px;">Ready Queue History Log</h3>
+          <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px; box-sizing: border-box; overflow-y: auto; max-height: 480px; flex-grow: 1;">
+            ${queuesHtml || '<div style="font-size: 11px; color: #94a3b8; font-style: italic;">No ready queue state logs available.</div>'}
+          </div>
+        </div>
+
+        <!-- Footer Info -->
+        <div style="position: absolute; bottom: 30px; left: 45px; right: 45px; border-top: 1px solid #e2e8f0; padding-top: 12px; display: flex; justify-content: space-between; font-size: 10px; color: #94a3b8;">
+          <span>CPU Scheduler Visualizer - Analytical Report</span>
+          <span>Page ${idx + 2} of ${lastResults.length + 1}</span>
+        </div>
+      `;
+      printParent.appendChild(pageAlgo);
+    });
+
+    document.body.appendChild(printParent);
+
+    const btn = $('download');
+    const originalText = btn.textContent;
+    btn.textContent = 'Generating PDF...';
+    btn.disabled = true;
+
+    // We render each child (each page) of the printParent container sequentially as its own canvas
+    const pageNodes = Array.from(printParent.children);
+    const renderPromises = pageNodes.map(node => html2canvas(node, {
+      scale: 2,
+      useCORS: true,
+      backgroundColor: '#ffffff',
+      logging: false
+    }));
+
+    Promise.all(renderPromises).then(canvases => {
+      const pdf = new jspdf.jsPDF('p', 'mm', 'a4');
+      canvases.forEach((canvas, index) => {
+        if (index > 0) {
+          pdf.addPage();
+        }
+        const imgData = canvas.toDataURL('image/png');
+        // Fit perfectly on A4 standard size (210mm x 297mm) with 0 margins
+        pdf.addImage(imgData, 'PNG', 0, 0, 210, 297, undefined, 'FAST');
+      });
+
+      pdf.save(`CPU-Scheduler-Analysis-Report-${new Date().toISOString().slice(0, 10)}.pdf`);
+      document.body.removeChild(printParent);
+      btn.textContent = originalText;
+      btn.disabled = false;
+    }).catch(err => {
+      console.error(err);
+      alert('Failed to generate high-fidelity PDF. Falling back to browser print option.');
+      window.print();
+      if(document.getElementById('pdf-print-parent')) {
+        document.body.removeChild(printParent);
+      }
+      btn.textContent = originalText;
+      btn.disabled = false;
+    });
+  }
+
+  $('download').onclick=downloadPdf;
+  renderProcesses(); $('run').click();
+})();
+</script>
+</body>
+</html>
